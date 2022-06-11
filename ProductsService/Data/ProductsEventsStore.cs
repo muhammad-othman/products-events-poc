@@ -8,15 +8,16 @@ namespace ProductsService.Data
     public class ProductsEventsStore : IProductsEventsStore
     {
         private readonly IModel rabbitMQChannel;
-        private IMongoCollection<Product> productsCollection;
+        private IMongoCollection<ProductEvent> productsEventsCollection;
 
+        private List<Product> productsList = new List<Product>();
 
         public ProductsEventsStore()
         {
             var dbClient = new MongoClient("mongodb://127.0.0.1:27017");
             var db = dbClient.GetDatabase("productsDB");
 
-            productsCollection = db.GetCollection<Product>("products");
+            productsEventsCollection = db.GetCollection<ProductEvent>("productsEvents");
 
 
             var factory = new ConnectionFactory();
@@ -30,6 +31,8 @@ namespace ProductsService.Data
             rabbitMQChannel = connection.CreateModel();
 
             rabbitMQChannel.ExchangeDeclare("products.bus", ExchangeType.Fanout, true);
+
+            ReprocessEvents();
         }
         public async Task<Product> AddProducts(Product product)
         {
@@ -41,14 +44,14 @@ namespace ProductsService.Data
                 ProductData = product,
             };
 
-            await ProcessProductEvent(productEvent);
+            await SaveAndProcessProductEvent(productEvent);
 
             return product;
         }
 
         public async Task DeleteProducts(Guid id)
         {
-            var deletedProduct = productsCollection.Find(x => x.Id == id).Single();
+            var deletedProduct = productsList.First(x => x.Id == id);
             var productEvent = new ProductEvent
             {
                 Id = Guid.NewGuid(),
@@ -56,7 +59,7 @@ namespace ProductsService.Data
                 ProductData = deletedProduct,
             };
 
-            await ProcessProductEvent(productEvent);
+            await SaveAndProcessProductEvent(productEvent);
         }
 
         public async Task<Product> UpdateProducts(Product product)
@@ -68,28 +71,35 @@ namespace ProductsService.Data
                 ProductData = product,
             };
 
-            await ProcessProductEvent(productEvent);
+            await SaveAndProcessProductEvent(productEvent);
             return product;
         }
 
-        private async Task ProcessProductEvent(ProductEvent productEvent)
+        private async Task SaveAndProcessProductEvent(ProductEvent productEvent)
         {
+            await productsEventsCollection.InsertOneAsync(productEvent);
 
+            ProcessProductEvent(productEvent);
+            PublishProductEvent(productEvent);
+        }
 
+        private void ProcessProductEvent(ProductEvent productEvent)
+        {
             switch (productEvent.Type)
             {
                 case EventType.Created:
-                    await productsCollection.InsertOneAsync(productEvent.ProductData);
+                    productsList.Add(productEvent.ProductData);
                     break;
                 case EventType.Updated:
-                    await productsCollection.FindOneAndReplaceAsync(p => p.Id == productEvent.ProductData.Id, productEvent.ProductData);
+                    var oldProduct = productsList.First(p => p.Id == productEvent.ProductData.Id);
+                    oldProduct.Description = productEvent.ProductData.Description;
+                    oldProduct.Price = productEvent.ProductData.Price;
+                    oldProduct.Name = productEvent.ProductData.Name;
                     break;
                 case EventType.Deleted:
-                    await productsCollection.FindOneAndDeleteAsync(p => p.Id == productEvent.ProductData.Id);
+                    productsList.RemoveAll(p => p.Id == productEvent.ProductData.Id);
                     break;
             }
-
-            PublishProductEvent(productEvent);
         }
 
         private void PublishProductEvent(ProductEvent productEvent)
@@ -100,8 +110,24 @@ namespace ProductsService.Data
 
         public async Task<List<Product>> GetProducts()
         {
-            var products = productsCollection.Find(_ => true);
-            return await products.ToListAsync();
+            return productsList;
+        }
+
+        public async Task ReprocessEvents(int limit = 0)
+        {
+            var eventsCollection = productsEventsCollection.Find(_ => true).SortBy(e => e.Created);
+
+            if(limit > 0)
+                eventsCollection.Limit(limit);
+
+            var eventsList = await  eventsCollection.ToListAsync();
+
+            productsList = new List<Product>();
+
+            foreach (var @event in eventsList)
+            {
+                ProcessProductEvent(@event);
+            }
         }
     }
 }

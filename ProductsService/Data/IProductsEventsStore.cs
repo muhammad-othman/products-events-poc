@@ -6,5 +6,7 @@
         Task<Product> AddProducts(Product product);
         Task<Product> UpdateProducts(Product product);
         Task DeleteProducts(Guid id);
+
+        Task ReprocessEvents(int limit = 0);
     }
 }

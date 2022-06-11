@@ -1,5 +1,5 @@
 ﻿
-namespace CartService
+namespace CartService.Data
 {
     public class Product
     {

@@ -42,5 +42,12 @@ namespace ProductsService.Controllers
             return Ok();
         }
 
+        [HttpPost("reprocessEvents")] 
+        public async Task<IActionResult> ReprocessProductEvents(int limit = 0)
+        {
+            await productsService.ReprocessEvents(limit);
+            return Ok();
+        }
+
     }
 }

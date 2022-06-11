@@ -1,4 +1,5 @@
 ﻿using CartService;
+using CartService.Data;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -6,8 +7,12 @@ using System.Text;
 
 class Program
 {
+
+    static ProductsContext productsContext;
     static void Main(string[] args)
     {
+
+        productsContext = new ProductsContext();
 
         var factory = new ConnectionFactory();
 
@@ -48,5 +53,28 @@ class Program
         Console.WriteLine("=================================");
         Console.WriteLine("=================================");
         Console.WriteLine("=================================");
+
+        ProcessProductEvent(productEvent);
+    }
+
+    private static void ProcessProductEvent(ProductEvent productEvent)
+    {
+        switch (productEvent.Type)
+        {
+            case EventType.Created:
+                productsContext.Products.Add(productEvent.ProductData);
+                break;
+            case EventType.Updated:
+                var oldProduct = productsContext.Products.First(p => p.Id == productEvent.ProductData.Id);
+                oldProduct.Price = productEvent.ProductData.Price;
+                oldProduct.Name = productEvent.ProductData.Name;
+                break;
+            case EventType.Deleted:
+                var removedProduct = productsContext.Products.First(p => p.Id == productEvent.ProductData.Id);
+                productsContext.Products.Remove(removedProduct);
+                break;
+        }
+
+        productsContext.SaveChanges();
     }
 }
